@@ -1,0 +1,13 @@
+[Unit]
+Description=PWM fan speed control
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/sh -c 'exec /usr/sbin/pwm_fan_control2'
+Type=simple
+User=root
+Group=root
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

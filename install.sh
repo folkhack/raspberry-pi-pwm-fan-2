@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [ "$( id -u )" != "0" ]; then
+    echo "This script must be run as root" 1>&2
+    exit 1
+fi
+
 echo "Installing pwm_fan_control2..."
 
 ###
@@ -9,18 +14,6 @@ echo "Installing git/build-essential..."
 # Install build tooling + get for dependencies
 apt update -y
 apt install -y git build-essential
-
-echo "Building and installing wiringPi..."
-
-# Install WiringPi
-pushd /tmp
-
-git clone https://github.com/WiringPi/WiringPi.git
-pushd WiringPi
-sudo ./build
-
-popd
-popd
 
 echo "Building, installing, and starting pwm_fan_control2..."
 

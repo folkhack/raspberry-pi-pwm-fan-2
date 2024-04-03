@@ -31,6 +31,12 @@
 #define CYAN    "\x1b[36m"
 #define RESET   "\x1b[0m"
 
+// Define fan modes
+#define FAN_BELOW_OFF 0
+#define FAN_BELOW_MIN 1
+#define FAN_ABOVE_EAS 2
+#define FAN_ABOVE_MAX 3
+
 // CPU temp out-of-bounds range where error is thrown (temp in C * 1000)
 #define CPU_TEMP_OOB_LOW 0
 #define CPU_TEMP_OOB_HIGH 120000
@@ -46,6 +52,9 @@
 
 // Define a minimum time between tach pulses to avoid spurious pulses
 #define TACH_MIN_TIME_DELTA_MS 2
+
+// Smooth temp bezier input array size
+#define CPU_TEMP_SMOOTH_ARR_SIZE 4
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -69,6 +78,9 @@ float MIN_OFF_TEMP_C = 38,
 
 // Debug logging mode enabled
 bool debug_logging_enabled = false;
+
+// CSV debugging - disables all logs minus telemetry
+bool csv_debug_logging_enabled = false;
 
 // Is setup flag to know if writing to the PWM is safe
 bool is_setup = false;
@@ -95,6 +107,9 @@ FILE *fd_cpu_temp = NULL;
 
 // Last time above the minimum off temp
 struct timeval last_above_min_epoch;
+
+// Array of last X CPU temps to average for smoothing out bezier input
+float cpu_temp_smooth_arr[ CPU_TEMP_SMOOTH_ARR_SIZE ] = {0};
 
 // Setup a flag so we can notify the main loop to close when SIGINT is
 //    caught and our halt is called
@@ -142,6 +157,12 @@ void handle_halt( int noop ) { halt_received = 1; }
 // Logging function DEBUG|INFO|ERROR constant for level; proxies vprintf and
 //    supports stderr for errors
 void l( int level, char* message_str, ... ) {
+
+    // CSV debugging ignores all debug/info logging
+    if( level != ERROR && csv_debug_logging_enabled ) {
+
+        return;
+    }
 
     va_list args;
 
@@ -197,12 +218,25 @@ unsigned char get_pwm_channel_num_from_bcm_gpio( unsigned short gpio_pin ) {
 // - NOTE: Must come before clean_up function due to being used to clean-up GPIO
 void gpio_set_export( bool is_enabled ) {
 
-    printf( "GPIO %s %s...\n", gpio_true_tach_num, is_enabled ? "exporting" : "un-exporting" );
+    l( INFO, "GPIO %s %s...\n", gpio_true_tach_num, is_enabled ? "exporting" : "un-exporting" );
 
     fprintf( is_enabled ? fd_gpio_tach_export : fd_gpio_tach_unexport, "%s", gpio_true_tach_num );
     fflush( is_enabled ? fd_gpio_tach_export : fd_gpio_tach_unexport );
 
-    printf( "GPIO %s %s!\n", gpio_true_tach_num, is_enabled ? "exported" : "un-exported" );
+    l( INFO, "GPIO %s %s!\n", gpio_true_tach_num, is_enabled ? "exported" : "un-exported" );
+}
+
+// Get the fan mode string from the integer representation
+const char* get_fan_mode_str( int fan_mode_int ) {
+
+    static const char* lookup[] = {
+        "BELOW_OFF",
+        "BELOW_MIN",
+        "ABOVE_EAS",
+        "ABOVE_MAX"
+    };
+
+    return lookup[ fan_mode_int ];
 }
 
 // Clean-up file descriptors and free the tachometer GPIO if needed
@@ -474,7 +508,31 @@ float get_cpu_temp_c() {
     }
 
     // Convert to correct Celsius temp double
-    return cpu_temp_raw / 1000;
+    float cpu_temp_c = cpu_temp_raw / 1000;
+
+    // Shift the existing elements to the right
+    memmove(
+        &cpu_temp_smooth_arr[1],
+        &cpu_temp_smooth_arr[0],
+        sizeof(float) * ( CPU_TEMP_SMOOTH_ARR_SIZE - 1 )
+    );
+
+    cpu_temp_smooth_arr[0] = cpu_temp_c;
+
+    return cpu_temp_c;
+}
+
+// Get CPU temp average
+float get_cpu_temp_avg_c() {
+
+    float sum = 0.0;
+
+    for( int i = 0; i < CPU_TEMP_SMOOTH_ARR_SIZE; i++ ) {
+
+        sum += cpu_temp_smooth_arr[ i ];
+    }
+
+    return sum / CPU_TEMP_SMOOTH_ARR_SIZE;
 }
 
 // Quartic bezier easing function
@@ -781,6 +839,9 @@ int main( int argc, char* argv[] ) {
                  "  Run w/debug logging:\n"
                  "    ./pwm_fan_tach2 debug\n"
                  "\n"
+                 "  Run w/CSV debug logging:\n"
+                 "    ./pwm_fan_tach2 csvdebug\n"
+                 "\n"
                  "  Run w/debug logging + tachometer on GPIO pin #24 with 2 pulses per revolution:\n"
                  "    ./pwm_fan_tach2 debug 24 2\n"
                  "\n"
@@ -798,6 +859,12 @@ int main( int argc, char* argv[] ) {
     if( argc > 1 && strcmp( argv[1], "debug" ) == 0 ) {
 
         debug_logging_enabled = true;
+    }
+
+    // Enable CSV debugging
+    if( argc > 1 && strcmp( argv[1], "csvdebug" ) == 0 ) {
+
+        csv_debug_logging_enabled = true;
     }
 
     // Check if the required number of arguments is provided if using tachometer
@@ -846,6 +913,19 @@ int main( int argc, char* argv[] ) {
 
     l( INFO, "Starting PWM fan controller...\n" );
 
+    // Setup CSV headers if needed
+    if( csv_debug_logging_enabled ) {
+
+        printf( "cur_temp_c,decided_mode,duty_cycle_set_val" );
+
+        if( is_tach_enabled ) {
+
+            printf( ",tach_rpm" );
+        }
+
+        printf( "\n" );
+    }
+
     pwm_setup();
 
     if( is_tach_enabled ) {
@@ -855,7 +935,7 @@ int main( int argc, char* argv[] ) {
         bcm_gpio_pin_tach  = ( unsigned short ) strtoul( argv[2], NULL, 10 );
         tach_pulse_per_rev = ( unsigned short ) strtoul( argv[3], NULL, 10 );
 
-        printf( "Monitoring GPIO pin: %d, Pulses per revolution: %d\n", bcm_gpio_pin_tach, tach_pulse_per_rev );
+        l( INFO, "Monitoring GPIO pin: %d, Pulses per revolution: %d\n", bcm_gpio_pin_tach, tach_pulse_per_rev );
 
         tach_gpio_setup();
         tach_polling_setup();
@@ -874,10 +954,15 @@ int main( int argc, char* argv[] ) {
     //  Main loop
     //
     struct timeval cur_epoch;
+    unsigned short duty_cycle_set_val;
+    float cur_temp_c;
+    float use_min_temp_c;
+    float grace_check_ms;
+    unsigned short decided_mode_int;
 
     while( ! halt_received ) {
 
-        float cur_temp_c = get_cpu_temp_c();
+        cur_temp_c = get_cpu_temp_c();
 
         // Set fan to full if error reading CPU
         if( cur_temp_c <= 0 ) {
@@ -890,8 +975,10 @@ int main( int argc, char* argv[] ) {
             continue;
         }
 
-        unsigned short duty_cycle_set_val = 0;
-        float use_min_temp_c              = MIN_ON_TEMP_C;
+        // Push temp to 
+
+        duty_cycle_set_val = 0;
+        use_min_temp_c     = MIN_ON_TEMP_C;
 
         // If we're above min off temp then set last_above_min_epoch
         if( cur_temp_c > use_min_temp_c ) {
@@ -901,33 +988,55 @@ int main( int argc, char* argv[] ) {
 
         gettimeofday( &cur_epoch, NULL );
 
-        float grace_check_ms = ( cur_epoch.tv_sec - last_above_min_epoch.tv_sec ) * 1000.0f + ( cur_epoch.tv_usec - last_above_min_epoch.tv_usec ) / 1000.0f;
+        grace_check_ms = ( cur_epoch.tv_sec - last_above_min_epoch.tv_sec ) * 1000.0f + ( cur_epoch.tv_usec - last_above_min_epoch.tv_usec ) / 1000.0f;
 
         // If we're below min temp and within fan off grace period set to min duty cycle
         if( cur_temp_c <= use_min_temp_c && grace_check_ms < FAN_OFF_GRACE_MS ) {
 
             duty_cycle_set_val = MIN_DUTY_CYCLE;
-            l( DEBUG, CYAN "%.2f" RESET " BELOW     use_min_temp_c - MIN_DUTY_CYCLE   ", cur_temp_c );
+            decided_mode_int   = FAN_BELOW_MIN;
+
+            l( DEBUG, CYAN "%.2f" RESET " BELOW_MIN use_min_temp_c - MIN_DUTY_CYCLE   ", cur_temp_c );
 
         } else if( cur_temp_c <= use_min_temp_c ) {
 
             duty_cycle_set_val = 0;
+            decided_mode_int   = FAN_BELOW_OFF;
+
             l( DEBUG, GREEN "%.2f" RESET " BELOW_OFF use_min_temp_c - OFF              ", cur_temp_c );
 
         } else if( cur_temp_c >= MAX_TEMP_C ) {
 
             duty_cycle_set_val = MAX_DUTY_CYCLE;
-            l( DEBUG, RED "%.2f" RESET " ABOVE     MAX_TEMP_C - MAX_DUTY_CYCLE       ", cur_temp_c );
+            decided_mode_int   = FAN_ABOVE_MAX;
+
+            l( DEBUG, RED "%.2f" RESET " ABOVE_MAX MAX_TEMP_C - MAX_DUTY_CYCLE       ", cur_temp_c );
 
         } else {
 
-            duty_cycle_set_val = quartic_bezier_easing( cur_temp_c, MIN_OFF_TEMP_C, MAX_TEMP_C, MIN_DUTY_CYCLE, MAX_DUTY_CYCLE );
-            l( DEBUG, YELLOW "%.2f" RESET " ABOVE     MAX_TEMP_C - quartic_bezier_easing", cur_temp_c );
+            duty_cycle_set_val = quartic_bezier_easing( get_cpu_temp_avg_c(), MIN_OFF_TEMP_C, MAX_TEMP_C, MIN_DUTY_CYCLE, MAX_DUTY_CYCLE );
+            decided_mode_int   = FAN_ABOVE_EAS;
+
+            l( DEBUG, YELLOW "%.2f" RESET " ABOVE_EAS MAX_TEMP_C - quartic_bezier_easing", cur_temp_c );
         }
 
         pwm_set_duty_cycle( duty_cycle_set_val );
         l( DEBUG, " - DC = " MAGENTA "%i" RESET, duty_cycle_set_val );
 
+        // Handle CSV logging
+        if( csv_debug_logging_enabled ) {
+
+            printf( "%.2f,%s,%i", cur_temp_c, get_fan_mode_str( decided_mode_int ), duty_cycle_set_val );
+
+            if( is_tach_enabled ) {
+
+                printf( ",%u", tach_rpm );
+            }
+
+            printf( "\n" );
+        }
+
+        // Output tachometer if needed
         if( is_tach_enabled ) {
 
             l( DEBUG, " - RPM = " CYAN "%i" RESET, tach_rpm );

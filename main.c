@@ -511,12 +511,12 @@ float get_cpu_temp_c() {
     float cpu_temp_c = cpu_temp_raw / 1000;
 
     // Shift the existing elements to the right
-    memmove(
-        &cpu_temp_smooth_arr[1],
-        &cpu_temp_smooth_arr[0],
-        sizeof(float) * ( CPU_TEMP_SMOOTH_ARR_SIZE - 1 )
-    );
+    for( int i = CPU_TEMP_SMOOTH_ARR_SIZE - 1; i > 0; i-- ) {
 
+        cpu_temp_smooth_arr[ i ] = cpu_temp_smooth_arr[ i - 1 ];
+    }
+
+    // Set the value
     cpu_temp_smooth_arr[0] = cpu_temp_c;
 
     return cpu_temp_c;
@@ -905,6 +905,8 @@ int main( int argc, char* argv[] ) {
     l( DEBUG, " - FAN_OFF_GRACE_MS = %i\n", FAN_OFF_GRACE_MS );
     l( DEBUG, " - SLEEP_MS         = %i\n", SLEEP_MS );
     l( DEBUG, "\n" );
+
+    for( int i = CPU_TEMP_SMOOTH_ARR_SIZE - 1; i > 0; i-- ) { cpu_temp_smooth_arr[i] = MAX_TEMP_C; }
 
     ////////////////////////////////////////////////////////////////////////////////
     //

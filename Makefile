@@ -1,6 +1,6 @@
-ENTRY  = main.c
 OPTS   = -g -O0 -Wall
-LIBS   = -L /usr/local/include -lwiringPi -lcrypt -lpthread -lm -lrt
+ENTRY  = main.c
+LIBS   = -L /usr/local/include -lm -lrt -lpthread
 TARGET = pwm_fan_control2
 
 # COMPILE:
@@ -8,19 +8,13 @@ compile:
 	gcc ${OPTS} ${ENTRY} ${LIBS} -o ${TARGET}
 	chmod +x ${TARGET}
 
-compile-debug:
-	gcc -DDEBUG ${OPTS} ${ENTRY} ${LIBS} -o ${TARGET}
-	chmod +x ${TARGET}
-
 clean:
 	rm ${TARGET}
 
 # INSTALL/UNINSTALL:
 install:
-	gcc ${OPTS} ${ENTRY} ${LIBS} -o ${TARGET}
-	chmod +x ${TARGET}
 	cp ${TARGET} /usr/sbin/${TARGET}
-
+	chown root:root /usr/sbin/${TARGET}
 	cp ${TARGET}.service /etc/systemd/system/${TARGET}.service
 
 uninstall:

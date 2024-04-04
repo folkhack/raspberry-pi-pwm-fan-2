@@ -570,7 +570,7 @@ void pwm_set_chip_export_channel( bool is_enabled ) {
 
     l( DEBUG, "PWM channel %s...\n", is_enabled ? "exporting" : "un-exporting" );
 
-    fprintf( is_enabled ? fd_pwm_chip_export : fd_pwm_chip_unexport, "%c", pwm_channel_num );
+    fprintf( is_enabled ? fd_pwm_chip_export : fd_pwm_chip_unexport, "%i", pwm_channel_num );
     fflush( is_enabled ? fd_pwm_chip_export : fd_pwm_chip_unexport );
 
     l( DEBUG, "PWM channel %s!\n", is_enabled ? "exported" : "un-exported" );

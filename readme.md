@@ -1,5 +1,6 @@
 # Raspberry Pi PWM Fan Control in C and Python
 
+* **SUPPORTED!** - Current/legacy, x32/x64 Raspberry Pi OS support, on Raspberry Pi models 3-5.
 * **CPU-efficient** - C binary with 0% CPU utilization.
 * **Non-stepwise** - Avoids constant on/off cycling of fan by using different on/off temps, grace periods, and bezier easing.
 * **Configurable** - Uses environment variables for overriding default configuration.
@@ -7,71 +8,29 @@
 
 ---
 
-## INDEV BRANCH NOTES:
+[!WARNING] Major April 2024 updates
+
+**This program expects a FULLY up-to-date Raspberry Pi OS (either current and legacy) and firmware**
 
 ```bash
-# To get base model name
-cat /sys/firmware/devicetree/base/model
+# Ensure OS up-to-date:
+sudo apt update -y && sudo apt upgrade -y
 
-# To watch the PWM state
-sudo cat /sys/kernel/debug/pwm
-
-# To get the GPIO mappings
-cat /sys/kernel/debug/gpio
-
-# "Raspberry Pi 5 Model B"
-#     /sys/class/pwm/pwmchip2
-#       BCM GPIO 12 - channel 0
-#       BCM GPIO 13 - channel 1
-#       BCM GPIO 18 - channel 2
-#       BCM GPIO 19 - channel 3
-#   GPIO mapping:
-#     GPIO12 - gpio-583
-#     GPIO13 - gpio-584
-#     GPIO18 - gpio-589
-#     GPIO19 - gpio-590
-
-# "Raspberry Pi 4 Model B"
-#     /sys/class/pwm/pwmchip0
-#       BCM GPIO 12 - channel 0
-#       BCM GPIO 13 - channel 1
-#       BCM GPIO 18 - channel 0
-#       BCM GPIO 19 - channel 1
-#   GPIO mapping:
-#     GPIO12 - gpio-524
-#     GPIO13 - gpio-525
-#     GPIO18 - gpio-530
-#     GPIO19 - gpio-531
-
-# "Raspberry Pi 3 Model B Plus"
-#   /sys/class/pwm/pwmchip0
-#     BCM GPIO 12 - channel 0
-#     BCM GPIO 13 - channel 1
-#     BCM GPIO 18 - channel 0
-#     BCM GPIO 19 - channel 1
-#   GPIO mapping:
-#     GPIO12 - gpio-524
-#     GPIO13 - gpio-525
-#     GPIO18 - gpio-530
-#     GPIO19 - gpio-531
-
+# Ensure up-to-date firmware:
+# - RUN AT YOUR OWN RISK!
+# - Needed to get consistent `sysfs` inteface between all models
+# - Needed to address https://forums.raspberrypi.com/viewtopic.php?t=367294#p2205138
+sudo rpi-update
 ```
 
-DO NOT USE - INCOMPLETE WORK!
+#### April 2024 Release Notes:
 
-* [X] Test with overlays
-    - [X] Update/finalize get_pwm_chip_num_from_bcm_gpio, get_pwm_channel_num_from_bcm_gpio
-    - [X] pwm-2channel overlay
-    - [X] no overlay
-    - [X] pwm overlay
-    - [ ] Add compatibility chart/notes to `readme.md`
-* [ ] Test with other Pis
-    - [ ] Raspberry Pi 3
-    - [ ] Raspberry Pi 4
-    - [ ] Raspberry Pi 5
-* [ ] Test with legacy OS
-* [ ] Add up-to-date OS + upgraded firmware notice and disclaimer
-* [ ] Cut a tag
+* **Debugging support has been updated** and is now controlled via CLI argument.
+* **Tachometer support has been updated** and is now controlled via CLI argument.
+* **Environment variables have been updated** specifically `PWM_FAN_FAN_OFF_GRACE_S` and `PWM_FAN_SLEEP_S` are now `PWM_FAN_FAN_OFF_GRACE_MS` and `PWM_FAN_SLEEP_MS`; tachometer environment variables have been removed
+* **WiringPi has been removed** - This was [breaking builds](https://github.com/folkhack/raspberry-pi-pwm-fan-2/issues/3#issue-2080669409) on the newer Raspbian OS after Gordon outright decided to abandon the project. There also has been [no movement](https://github.com/GrazerComputerClub/WiringPi/issues/21) for Raspberry Pi 5 support for months. WiringPi will not be considered moving forward.
+* **It was not replaced with another library** - gpiod doesn't have PWM support, pigpio is inefficient with the CPU and lacks RPi support - there is **no** fully supported GPIO + hardware PWM C library that exists right now. I am also incredibly disappointed with how fast these libraries have fallen out of support, with their efficiency, and with the features they are lacking.
+* **`sysfs` is now our PWM and GPIO control surface** - This was the _only_ way to get PWM support for all Raspberry Pi OS versions, for all modern Pi's 3-5. Despite any discussions about its deprecation, sysfs is not going away anytime soon. Its integration into the Linux kernel and its importance in existing applications and systems ensure its longevity. Do you want your fans to work consistently for all modern Pi's, with their OS variants? This is your only feasible option.
 
 ---
 
@@ -107,6 +66,26 @@ DO NOT USE - INCOMPLETE WORK!
 ![Noctua docs wiring diagram](docs/noctua_wiring_diagram.png "Noctua docs wiring diagram")
 
 *From [Noctua General PWM Fan Whitepaper](https://noctua.at/pub/media/wysiwyg/Noctua_PWM_specifications_white_paper.pdf)*
+
+---
+
+## PWM dtoverlay Configuration:
+
+Base configuration is `dtoverlay=pwm,pin=18,func=2` in `/boot/config.txt` (or `/boot/firmware/config.txt`):
+
+```bash
+# Add `dtoverlay=pwm,pin=18,func=2` devicetree overlay in boot configuration and restart:
+# - NOTE: Configuratio may be at /boot/config.txt depending on OS version!
+sudo nano /boot/firmware/config.txt
+sudo shutdown -r now
+```
+
+#### PWN dtoverlay Notes:
+
+* All dtoverlay configurations in the below link have been tested successfully
+* Function 2/4, and alt0/alt5 configured channels work
+
+See [Enabling Hardware PWM on Raspberry Pi](https://github.com/dotnet/iot/blob/main/Documentation/raspi-pwm.md) for more information (differnt pins, 2 channel support, etc.).
 
 ---
 

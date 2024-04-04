@@ -1,4 +1,4 @@
-# Raspberry Pi PWM Fan Control in C and Python
+# Raspberry Pi PWM Fan Control in C
 
 * **SUPPORTED!** - Current/legacy, x32/x64 Raspberry Pi OS support, on Raspberry Pi models 3-5.
 * **CPU-efficient** - C binary with 0% CPU utilization.

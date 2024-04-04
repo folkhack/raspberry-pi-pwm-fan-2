@@ -1,6 +1,6 @@
 OPTS   = -g -O0 -Wall
 ENTRY  = main.c
-LIBS   = -L /usr/local/include -lm -lrt
+LIBS   = -L /usr/local/include -lm -lrt -lpthread
 TARGET = pwm_fan_control2
 
 # COMPILE:

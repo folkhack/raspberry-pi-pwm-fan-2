@@ -1,20 +1,26 @@
 #!/bin/bash
 
+echo "Starting pwm_fan_control2 installation script..."
+
 if [ "$( id -u )" != "0" ]; then
     echo "This script must be run as root" 1>&2
     exit 1
 fi
 
+echo "Checking for git and build-essential dependencies..."
+
+if ! dpkg -s git build-essential >/dev/null 2>&1; then
+
+    echo "Ensuring git and build-essential installed..."
+    apt update -y
+    apt install -y git build-essential
+
+else
+
+    echo "git and build-essential already installed!"
+fi
+
 echo "Installing pwm_fan_control2..."
-
-###
-
-echo "Installing git/build-essential..."
-
-# Install build tooling + get for dependencies
-apt update -y
-apt install -y git build-essential
-
 echo "Building, installing, and starting pwm_fan_control2..."
 
 # Build and install pwm_fan_control2

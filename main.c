@@ -12,6 +12,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -133,7 +134,7 @@ ModelMapping MODEL_SYSFS_MAP[] = {
         2,
 
         // GPIO PWM map
-        { {12, 0}, {13, 1}, {18, 2}, {19, 3} },
+        { {18, 0}, {19, 1}, {12, 2}, {13, 3} },
 
         // GPIO map
         {
@@ -407,6 +408,37 @@ void clean_up_and_exit( int exit_code ) {
     exit( 0 );
 }
 
+// Simple wait for file function for waiting for interfaces after they are exported
+void wait_for_file_with_timeout( const char *filepath, int timeout_seconds ) {
+
+    l( DEBUG, "Waiting for %s to exist...\n", filepath );
+
+    // 50 ms
+    const useconds_t interval = 50000;
+
+    // Convert timeout to microseconds and divide by interval
+    int max_attempts = ( timeout_seconds * 500000 ) / interval;
+
+    for( int attempts = 0; attempts < max_attempts; attempts++ ) {
+
+        if( access( filepath, F_OK ) != -1 ) {
+
+            l( DEBUG, "File %s exists! Continuing...\n", filepath );
+            return;
+
+        } else if( errno != ENOENT ) {
+
+            l( ERROR, "Error checking for %s exists!\n", filepath );
+            clean_up_and_exit( 1 );
+        }
+
+        usleep( interval );
+    }
+
+    l( ERROR, "Timeout exceeded waiting for %s to exist!\n", filepath );
+    clean_up_and_exit( 1 );
+}
+
 // Open a file descriptor at path with specific mode and die on failure
 void open_fd( char* path_str, FILE **file_descriptor, char* mode ) {
 
@@ -604,6 +636,10 @@ void pwm_setup() {
 
     char channel_enable_path_str[64];
     snprintf( channel_enable_path_str, sizeof( channel_enable_path_str ), "%senable", pwm_channel_path_str );
+
+    // Wait for PWM channel enable to become available before opening it
+    wait_for_file_with_timeout( channel_enable_path_str, 5 );
+
     open_fd( channel_enable_path_str, &fd_pwm_channel_enable, "w" );
 
     char channel_set_duty_cycle_path_str[64];
@@ -811,6 +847,10 @@ void tach_gpio_setup() {
 
     char gpio_active_low_path_str[48];
     snprintf( gpio_active_low_path_str, sizeof( gpio_active_low_path_str ), "%sactive_low", gpio_pin_path_str );
+
+    // Wait for GPIO settings interface before continuing
+    wait_for_file_with_timeout( gpio_active_low_path_str, 5 );
+
     open_fd( gpio_active_low_path_str, &fd_gpio_tach_active_low, "w" );
 
     char gpio_direction_path_str[48];

@@ -155,7 +155,7 @@ ModelMapping MODEL_SYSFS_MAP[] = {
 short rpi_model = -1;
 
 // ENV CONFIG - Declare configuration variables w/expected type
-unsigned short BCM_GPIO_PIN_PWM = 19,
+unsigned short BCM_GPIO_PIN_PWM = 18,
                PWM_FREQ_HZ      = 2500,
                MIN_DUTY_CYCLE   = 20,
                MAX_DUTY_CYCLE   = 100,

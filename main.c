@@ -502,7 +502,7 @@ void get_raspberry_pi_model( void ) {
         clean_up_and_exit( 1 );
     }
 
-    l( INFO, "Raspberry Pi model is %i\n!", rpi_model );
+    l( INFO, "Raspberry Pi model is %i!\n", rpi_model );
 }
 
 // Get the GPIO or GPIO PWM sysfs interface #

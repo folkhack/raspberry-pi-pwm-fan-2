@@ -42,12 +42,10 @@ sudo rpi-update
 * "Pin #" are the board pin numbers; as-in "pin 1 starts at J8" numbers
 * "GPIO #" are the BCM GPIO numbers used for software configuration via environment variables
 * "Duty cycle signal" must be on a PWM capable GPIO pin:
-    - Raspberry Pi 3/4 (channels share setting)
-        + GPIO12 - PWM0
-        + GPIO18 - PWM0
-        + GPIO13 - PWM1
-        + GPIO19 - PWM1
-    - You may have to disable audio since it requires PWM to work via `dtparam=audio=off` in `/boot/config.txt`
+    - GPIO18 - default
+    - GPIO19 - PWM1
+    - GPIO12 - PWM0
+    - GPIO13 - PWM1
 
 |Pin #|GPIO #|Name|Color|Notes|
 |---|---|---|---|---|

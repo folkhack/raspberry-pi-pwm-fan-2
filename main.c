@@ -31,6 +31,21 @@
 #define CYAN    "\x1b[36m"
 #define RESET   "\x1b[0m"
 
+// Define Raspberry Pi models
+#define RPI_MODEL_3 3
+#define RPI_MODEL_4 4
+#define RPI_MODEL_5 5
+
+// Define the types mapping lookups we will need
+#define LOOKUP_PWM_CHIP         0
+#define LOOKUP_GPIO_PWM_CHANNEL 1
+#define LOOKUP_GPIO             2
+
+// Define max possible # of supported GPIO and GPIO PWM pins
+#define MAX_GPIO     26
+#define MAX_GPIO_PWM 4
+
+
 // Define fan modes
 #define FAN_BELOW_OFF 0
 #define FAN_BELOW_MIN 1
@@ -58,11 +73,89 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 //
+//  Lookups
+//
+
+typedef struct {
+    int gpio_num;
+    int sysfs_num;
+} PinMapping;
+
+typedef struct {
+    int pwm_chip_num;
+    PinMapping gpio_pwm_map[ MAX_GPIO_PWM ];
+    PinMapping gpio_map[ MAX_GPIO ];
+} ModelMapping;
+
+// IMPORTANT!!!
+// - Must be sequentially incremented based on Raspberry Pi model #; ie 3, 4, 5
+ModelMapping MODEL_SYSFS_MAP[] = {
+
+    // For Raspberry Pi 3 Model B
+    {
+        // PWM chip #
+        0,
+
+        // GPIO PWM map
+        { {12, 0}, {13, 1}, {18, 0}, {19, 1} },
+
+        // GPIO map
+        {
+            {2, 514}, {3, 515}, {4, 516}, {5, 517}, {6, 518}, {7, 519},
+            {8, 520}, {9, 521}, {10, 522}, {11, 523}, {12, 524}, {13, 525},
+            {14, 526}, {15, 527}, {16, 528}, {17, 529}, {18, 530}, {19, 531},
+            {20, 532}, {21, 533}, {22, 534}, {23, 535}, {24, 536}, {25, 537},
+            {26, 538}, {27, 539}
+        }
+    },
+
+    // For Raspberry Pi 4 Model B
+    {
+        // PWM chip #
+        0,
+
+        // GPIO PWM map
+        { {12, 0}, {13, 1}, {18, 0}, {19, 1} },
+
+        // GPIO map
+        {
+            {2, 514}, {3, 515}, {4, 516}, {5, 517}, {6, 518}, {7, 519},
+            {8, 520}, {9, 521}, {10, 522}, {11, 523}, {12, 524}, {13, 525},
+            {14, 526}, {15, 527}, {16, 528}, {17, 529}, {18, 530}, {19, 531},
+            {20, 532}, {21, 533}, {22, 534}, {23, 535}, {24, 536}, {25, 537},
+            {26, 538}, {27, 539}
+        }
+    },
+
+    // For Raspberry Pi 5 Model B
+    {
+        // PWM chip #
+        2,
+
+        // GPIO PWM map
+        { {12, 0}, {13, 1}, {18, 2}, {19, 3} },
+
+        // GPIO map
+        {
+            {2, 573}, {3, 574}, {4, 575}, {5, 576}, {6, 577}, {7, 578},
+            {8, 579}, {9, 580}, {10, 581}, {11, 582}, {12, 583}, {13, 584},
+            {14, 585}, {15, 586}, {16, 587}, {17, 588}, {18, 589}, {19, 590},
+            {20, 591}, {21, 592}, {22, 593}, {23, 594}, {24, 595}, {25, 596},
+            {26, 597}, {27, 598}
+        }
+    }
+};
+
+////////////////////////////////////////////////////////////////////////////////
+//
 //  Global scope vars
 //
 
+// Model of Raspberry Pi
+short rpi_model = -1;
+
 // ENV CONFIG - Declare configuration variables w/expected type
-unsigned short BCM_GPIO_PIN_PWM = 18,
+unsigned short BCM_GPIO_PIN_PWM = 19,
                PWM_FREQ_HZ      = 2500,
                MIN_DUTY_CYCLE   = 20,
                MAX_DUTY_CYCLE   = 100,
@@ -92,8 +185,8 @@ bool is_tach_enabled = false;
 unsigned int pwm_duty_cycle_period_ns;
 
 // Keep chip number and channel number in broad scope for clean-up
-unsigned char pwm_chip_num;
-unsigned char pwm_channel_num;
+unsigned short pwm_chip_num;
+unsigned short pwm_channel_num;
 
 // File descriptors for control through /sys/class
 FILE *fd_pwm_chip_export                   = NULL;
@@ -125,7 +218,7 @@ volatile unsigned short tach_rpm = 0;
 struct timeval tach_last_fall_epoch;
 
 // True GPIO tachometer GPIO # from /sys/kernel/debug/gpio
-char gpio_true_tach_num[4];
+unsigned short gpio_true_tach_num;
 
 // GPIO file descriptors
 FILE *fd_gpio_tach_export     = NULL;
@@ -191,52 +284,16 @@ void l( int level, char* message_str, ... ) {
     va_end( args );
 }
 
-// Get the PWM chip number from the BCM GPIO number
-// - TODO: Test configurations and implement!
-unsigned char get_pwm_chip_num_from_bcm_gpio( unsigned short gpio_pin ) {
-
-    static const unsigned char lookup[] = {
-        [18] = '2'
-    };
-
-    return lookup[ gpio_pin ];
-}
-
-// Get the PWM channel number from the BCM GPIO number
-// - TODO: Test configurations and implement!
-unsigned char get_pwm_channel_num_from_bcm_gpio( unsigned short gpio_pin ) {
-
-    static const unsigned char lookup[] = {
-        [18] = '2'
-        // TOOD: test, add the rest
-    };
-
-    return lookup[ gpio_pin ];
-}
-
 // Enable/disable GPIO via sysfs
 // - NOTE: Must come before clean_up function due to being used to clean-up GPIO
 void gpio_set_export( bool is_enabled ) {
 
-    l( INFO, "GPIO %s %s...\n", gpio_true_tach_num, is_enabled ? "exporting" : "un-exporting" );
+    l( INFO, "GPIO %i %s...\n", gpio_true_tach_num, is_enabled ? "exporting" : "un-exporting" );
 
-    fprintf( is_enabled ? fd_gpio_tach_export : fd_gpio_tach_unexport, "%s", gpio_true_tach_num );
+    fprintf( is_enabled ? fd_gpio_tach_export : fd_gpio_tach_unexport, "%i", gpio_true_tach_num );
     fflush( is_enabled ? fd_gpio_tach_export : fd_gpio_tach_unexport );
 
-    l( INFO, "GPIO %s %s!\n", gpio_true_tach_num, is_enabled ? "exported" : "un-exported" );
-}
-
-// Get the fan mode string from the integer representation
-const char* get_fan_mode_str( int fan_mode_int ) {
-
-    static const char* lookup[] = {
-        "BELOW_OFF",
-        "BELOW_MIN",
-        "ABOVE_EAS",
-        "ABOVE_MAX"
-    };
-
-    return lookup[ fan_mode_int ];
+    l( INFO, "GPIO %i %s!\n", gpio_true_tach_num, is_enabled ? "exported" : "un-exported" );
 }
 
 // Clean-up file descriptors and free the tachometer GPIO if needed
@@ -292,42 +349,42 @@ void clean_up() {
 
         gpio_set_export( false );
 
-        printf( "Freeing fd_gpio_tach_unexport...\n" );
+        l( DEBUG, "Freeing fd_gpio_tach_unexport...\n" );
         fclose( fd_gpio_tach_unexport );
         fd_gpio_tach_unexport = NULL;
     }
 
     if( fd_gpio_tach_export != NULL ) {
 
-        printf( "Freeing fd_gpio_tach_export...\n" );
+        l( DEBUG, "Freeing fd_gpio_tach_export...\n" );
         fclose( fd_gpio_tach_export );
         fd_gpio_tach_export = NULL;
     }
 
     if( fd_gpio_tach_active_low != NULL ) {
 
-        printf( "Freeing fd_gpio_tach_active_low...\n" );
+        l( DEBUG, "Freeing fd_gpio_tach_active_low...\n" );
         fclose( fd_gpio_tach_active_low );
         fd_gpio_tach_active_low = NULL;
     }
 
     if( fd_gpio_tach_direction != NULL ) {
 
-        printf( "Freeing fd_gpio_tach_direction...\n" );
+        l( DEBUG, "Freeing fd_gpio_tach_direction...\n" );
         fclose( fd_gpio_tach_direction );
         fd_gpio_tach_direction = NULL;
     }
 
     if( fd_gpio_tach_edge != NULL ) {
 
-        printf( "Freeing fd_gpio_tach_edge...\n" );
+        l( DEBUG, "Freeing fd_gpio_tach_edge...\n" );
         fclose( fd_gpio_tach_edge );
         fd_gpio_tach_edge = NULL;
     }
 
     if( fd_gpio_tach_value > 0 ) {
 
-        printf( "Freeing fd_gpio_tach_value...\n" );
+        l( DEBUG, "Freeing fd_gpio_tach_value...\n" );
         close( fd_gpio_tach_value );
         fd_gpio_tach_value = -1;
     }
@@ -364,6 +421,116 @@ void open_fd( char* path_str, FILE **file_descriptor, char* mode ) {
     }
 
     l( DEBUG, "\"%s\" opened!...\n", path_str );
+}
+
+// Get the Raspberry Pi model so we can get the correct PWM/GPIO mappings
+void get_raspberry_pi_model( void ) {
+
+    const char *devicetree_model_path = "/sys/firmware/devicetree/base/model";
+    FILE *fd_devicetree_model;
+
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t read;
+
+    l( INFO, "Getting Raspberry Pi model...\n" );
+
+    fd_devicetree_model = fopen( devicetree_model_path, "r" );
+
+    if( fd_devicetree_model == NULL ) {
+
+        l( ERROR, "Unable to open %s!\n", devicetree_model_path );
+        clean_up_and_exit( 1 );
+    }
+
+    // Read the contents of the file
+    if( ( read = getline( &line, &len, fd_devicetree_model ) ) != -1 ) {
+
+        if( strstr( line, "Raspberry Pi 3 Model B" ) ) {
+
+            rpi_model = 3;
+
+        } else if ( strstr( line, "Raspberry Pi 4 Model B" ) ) {
+
+            rpi_model = 4;
+
+        } else if ( strstr( line, "Raspberry Pi 5 Model B" ) ) {
+
+            rpi_model = 5;
+        }
+    }
+
+    fclose( fd_devicetree_model );
+
+    if( line ) { free( line ); }
+
+    if( rpi_model < 3 ) {
+
+        l( ERROR, "Invalid Raspberry Pi model! [get_raspberry_pi_model]\n" );
+        clean_up_and_exit( 1 );
+    }
+
+    l( INFO, "Raspberry Pi model is %i\n!", rpi_model );
+}
+
+// Get the GPIO or GPIO PWM sysfs interface #
+unsigned short get_gpio_sysfs_num( int lookup_type, int lookup_idx ) {
+
+    // Adjust index to start at Raspberry Pi model 3
+    int adj_model_idx = rpi_model - 3;
+
+    if( adj_model_idx < 0 || adj_model_idx > ( sizeof( MODEL_SYSFS_MAP ) - 1 ) ) {
+
+        l( ERROR, "Invalid Raspberry Pi model! [get_gpio_pin]\n" );
+        clean_up_and_exit( 1 );
+    }
+
+    ModelMapping cur_model = MODEL_SYSFS_MAP[ adj_model_idx ];
+
+    // PWM chip # lookup is singular per-model
+    if( lookup_type == LOOKUP_PWM_CHIP ) { return cur_model.pwm_chip_num; }
+
+    // PWM channels or GPIO mappings require iterating over their respective # of member mappings
+    int loop_boundary;
+
+    if( lookup_type == LOOKUP_GPIO_PWM_CHANNEL ) {
+
+        loop_boundary = MAX_GPIO_PWM;
+
+    } else {
+
+        loop_boundary = MAX_GPIO;
+    }
+
+    // Iterate over GPIO to sysfs interface mappings
+    for( int i = 0; i < loop_boundary; i++ ) {
+
+        PinMapping cur_mapping = ( lookup_type == LOOKUP_GPIO_PWM_CHANNEL ) ?
+            cur_model.gpio_pwm_map[ i ] :
+            cur_model.gpio_map[ i ];
+
+        // If the current mapping matches then return the sysfs number for that interface
+        if( cur_mapping.gpio_num == lookup_idx ) { return cur_mapping.sysfs_num; }
+    }
+
+    // Should have returned by now - executing here is explicit error
+    l( ERROR, "Could not find GPIO mapping for lookup type %i and lookup idx %i!\n", lookup_type, lookup_idx );
+    clean_up_and_exit( 1 );
+
+    return -1;
+}
+
+// Get the fan mode string from the integer representation
+const char* get_fan_mode_str( int fan_mode_int ) {
+
+    static const char* lookup[] = {
+        "BELOW_OFF",
+        "BELOW_MIN",
+        "ABOVE_EAS",
+        "ABOVE_MAX"
+    };
+
+    return lookup[ fan_mode_int ];
 }
 
 // Enable/disable the PWM chip control via sysfs
@@ -410,17 +577,17 @@ void pwm_set_max_duty_cycle() {
 void pwm_setup() {
 
     // Get PWM chip and channel numbers
-    pwm_chip_num = get_pwm_chip_num_from_bcm_gpio( BCM_GPIO_PIN_PWM );
-    pwm_channel_num = get_pwm_channel_num_from_bcm_gpio( BCM_GPIO_PIN_PWM );
+    pwm_chip_num = get_gpio_sysfs_num( LOOKUP_PWM_CHIP, -1 );
+    pwm_channel_num = get_gpio_sysfs_num( LOOKUP_GPIO_PWM_CHANNEL, BCM_GPIO_PIN_PWM );
 
     // Format to paths for /sys/class control
-    char pwm_chip_path_str[25];
-    char pwm_channel_path_str[30];
+    char pwm_chip_path_str[32];
+    char pwm_channel_path_str[48];
 
-    snprintf( pwm_chip_path_str, sizeof( pwm_chip_path_str ), "/sys/class/pwm/pwmchip%c/", pwm_chip_num );
-    snprintf( pwm_channel_path_str, sizeof( pwm_channel_path_str ), "%spwm%c/", pwm_chip_path_str, pwm_channel_num );
+    snprintf( pwm_chip_path_str, sizeof( pwm_chip_path_str ), "/sys/class/pwm/pwmchip%i/", pwm_chip_num );
+    snprintf( pwm_channel_path_str, sizeof( pwm_channel_path_str ), "%spwm%i/", pwm_chip_path_str, pwm_channel_num );
 
-    char chip_unexport_str[33];
+    char chip_unexport_str[64];
     snprintf( chip_unexport_str, sizeof( chip_unexport_str ), "%sunexport", pwm_chip_path_str );
     open_fd( chip_unexport_str, &fd_pwm_chip_unexport, "w" );
 
@@ -428,31 +595,28 @@ void pwm_setup() {
     pwm_set_chip_export_channel( false );
 
     // Setup file descriptors/handles for /sys/class control points
-    char chip_export_str[31];
+    char chip_export_str[64];
     snprintf( chip_export_str, sizeof( chip_export_str ), "%sexport", pwm_chip_path_str );
     open_fd( chip_export_str, &fd_pwm_chip_export, "w" );
 
     // Setup the chip export channel
     pwm_set_chip_export_channel( true );
 
-    char channel_enable_path_str[37];
+    char channel_enable_path_str[64];
     snprintf( channel_enable_path_str, sizeof( channel_enable_path_str ), "%senable", pwm_channel_path_str );
     open_fd( channel_enable_path_str, &fd_pwm_channel_enable, "w" );
 
-    // Allow channel to settle before enabling
-    // sleep( 1 );
-
-    char channel_set_duty_cycle_path_str[43];
+    char channel_set_duty_cycle_path_str[64];
     snprintf( channel_set_duty_cycle_path_str, sizeof( channel_set_duty_cycle_path_str ), "%sduty_cycle", pwm_channel_path_str );
     open_fd( channel_set_duty_cycle_path_str, &fd_pwm_channel_set_duty_cycle, "w" );
 
-    char channel_set_duty_cycle_period_path_str[39];
+    char channel_set_duty_cycle_period_path_str[64];
     snprintf( channel_set_duty_cycle_period_path_str, sizeof( channel_set_duty_cycle_period_path_str ), "%speriod", pwm_channel_path_str );
     open_fd( channel_set_duty_cycle_period_path_str, &fd_pwm_channel_set_duty_cycle_period, "w" );
 
     // Setup PWM duty cycle period
     pwm_duty_cycle_period_ns = ( 1000000000 / PWM_FREQ_HZ );
-    
+
     l( DEBUG, "Setting duty cycle period to %u...\n", pwm_duty_cycle_period_ns );
 
     fprintf( fd_pwm_channel_set_duty_cycle_period, "%u", pwm_duty_cycle_period_ns );
@@ -544,6 +708,12 @@ unsigned short quartic_bezier_easing(
     unsigned short range_2_low,
     unsigned short range_2_high ) {
 
+    // Just in case we're OOB for the passed value
+    // - This can happen using CPU temp smoothing because the averages may fall out of the
+    //   singular instantaneous check in the main loop
+    if( cur_val < range_1_low )  { return MIN_DUTY_CYCLE; }
+    if( cur_val > range_1_high ) { return MAX_DUTY_CYCLE; }
+
     unsigned short range_1_delta = range_1_high - range_1_low,
                    range_2_delta = range_2_high - range_2_low;
 
@@ -559,75 +729,14 @@ unsigned short quartic_bezier_easing(
         pct_quartic_bezier_range_2_delta = 1 - ( pow( -2 * pct_range_1_delta + 2, 4 ) ) / 2;
     }
 
-    float quartic_bezier_val = pct_quartic_bezier_range_2_delta * range_2_delta + range_2_low;
+    unsigned short quartic_bezier_val = round( pct_quartic_bezier_range_2_delta * range_2_delta + range_2_low );
 
-    return (unsigned short) round( quartic_bezier_val );
-}
+    // Ensure we don't pass invalid duty cycle
+    // - Should not happen due to above temp range check
+    if( quartic_bezier_val < MIN_DUTY_CYCLE )  { return MIN_DUTY_CYCLE; }
+    if( quartic_bezier_val > MAX_DUTY_CYCLE ) { return MAX_DUTY_CYCLE; }
 
-// Get the true GPIO number that's associated to the BCM GPIO # provided so
-//    we can look the device up in the sysfs interface
-void get_true_gpio_num( int gpio_number, char* output ) {
-
-    const char* path_str = "/sys/kernel/debug/gpio";
-
-    // Get a file descriptor for the GPIO debug/status file
-    FILE* fd = fopen( path_str, "r" );
-
-    if( fd == NULL ) {
-
-        l( ERROR, "Error opening \"%s\"\n", path_str );
-        clean_up_and_exit( 1 );
-    }
-
-    // Buffer for lines
-    char line[256];
-
-    // Buffer for search string
-    char search_string[6];
-
-    // Format search string (looking for GPIO{num})
-    sprintf( search_string, "GPIO%i", gpio_number );
-    l( INFO, "Searching for \"%s\" in %s\n", search_string, path_str );
-
-    // Iterate over file contents by line
-    while( fgets( line, sizeof( line ), fd ) != NULL ) {
-
-        // When line is found
-        if( strstr( line, search_string ) ) {
-
-            // Advance a pointer to the first found digit
-            char* ptr = line;
-
-            while( *ptr && ! ( *ptr >= '0' && *ptr <= '9' ) ) { ptr++; }
-
-            // Found a digit, start extracting
-            if( *ptr ) {
-
-                int num_len = 0;
-
-                while( *ptr >= '0' && *ptr <= '9' ) {
-
-                    output[ num_len++ ] = *ptr++;
-                }
-
-                // Null-terminate the string
-                output[ num_len ] = '\0';
-
-                // Release the file descriptor and return
-                fclose( fd );
-                return;
-            }
-
-            // Found the correct line but no number, exit the loop
-            break;
-        }
-    }
-
-    // Release the file descriptor
-    fclose( fd );
-
-    l( ERROR, "Could not find proper GPIO number! Exiting with status 1...\n" );
-    exit( 1 );
+    return quartic_bezier_val;
 }
 
 // Handler for tachometer pull-down (ie: rotation pulse)
@@ -651,12 +760,12 @@ void on_tach_pull_down() {
 }
 
 // Setup the GPIO polling interrupt for the tachomter using the true GPIO number
-void setup_tach_gpio_interrupt( char* true_gpio_num ) {
+void setup_tach_gpio_interrupt( unsigned short true_gpio_num ) {
 
-    l( INFO, "Setting up GPIO polling interrupt on true GPIO #%s...\n", true_gpio_num );
+    l( INFO, "Setting up GPIO polling interrupt on true GPIO #%i...\n", true_gpio_num );
 
     char gpio_value_path[32];
-    snprintf( gpio_value_path, sizeof( gpio_value_path ), "/sys/class/gpio/gpio%s/value", true_gpio_num );
+    snprintf( gpio_value_path, sizeof( gpio_value_path ), "/sys/class/gpio/gpio%i/value", true_gpio_num );
 
     fd_gpio_tach_value = open( gpio_value_path, O_RDONLY | O_NONBLOCK );
 
@@ -676,7 +785,7 @@ void setup_tach_gpio_interrupt( char* true_gpio_num ) {
     // Priority data (rising or rising edge)
     poll_tach_gpio.events = POLLPRI;
 
-    l( INFO, "GPIO polling interrupt setup on true GPIO #%s!\n", true_gpio_num );
+    l( INFO, "GPIO polling interrupt setup on true GPIO #%i!\n", true_gpio_num );
 }
 
 // Setup the tachometer for measuring fan RPM
@@ -684,8 +793,8 @@ void tach_gpio_setup() {
 
     l( INFO, "Tachometer support enabled on GPIO #%i! Setting up pull-down event handler...\n", bcm_gpio_pin_tach );
 
-    get_true_gpio_num( bcm_gpio_pin_tach, gpio_true_tach_num );
-    l( INFO, "Tachometer true GPIO found: %s\n", gpio_true_tach_num );
+    gpio_true_tach_num = get_gpio_sysfs_num( LOOKUP_GPIO, bcm_gpio_pin_tach );
+    l( INFO, "Tachometer true GPIO found: %i\n", gpio_true_tach_num );
 
     char gpio_path_str[17] = "/sys/class/gpio/";
 
@@ -698,7 +807,7 @@ void tach_gpio_setup() {
     gpio_set_export( true );
 
     char gpio_pin_path_str[32];
-    snprintf( gpio_pin_path_str, sizeof( gpio_pin_path_str ), "%sgpio%s/", gpio_path_str, gpio_true_tach_num );
+    snprintf( gpio_pin_path_str, sizeof( gpio_pin_path_str ), "%sgpio%i/", gpio_path_str, gpio_true_tach_num );
 
     char gpio_active_low_path_str[48];
     snprintf( gpio_active_low_path_str, sizeof( gpio_active_low_path_str ), "%sactive_low", gpio_pin_path_str );
@@ -906,7 +1015,7 @@ int main( int argc, char* argv[] ) {
     l( DEBUG, " - SLEEP_MS         = %i\n", SLEEP_MS );
     l( DEBUG, "\n" );
 
-    for( int i = CPU_TEMP_SMOOTH_ARR_SIZE - 1; i > 0; i-- ) { cpu_temp_smooth_arr[i] = MAX_TEMP_C; }
+    for( int i = 0; i < CPU_TEMP_SMOOTH_ARR_SIZE; i++ ) { cpu_temp_smooth_arr[i] = MAX_TEMP_C; }
 
     ////////////////////////////////////////////////////////////////////////////////
     //
@@ -928,6 +1037,10 @@ int main( int argc, char* argv[] ) {
         printf( "\n" );
     }
 
+    // Get the Raspberry Pi model for both PWM and tachometer setup
+    get_raspberry_pi_model();
+
+    // Setup the PWM interface for controlling the fan speed
     pwm_setup();
 
     if( is_tach_enabled ) {
@@ -977,7 +1090,7 @@ int main( int argc, char* argv[] ) {
             continue;
         }
 
-        // Push temp to 
+        // Push temp to
 
         duty_cycle_set_val = 0;
         use_min_temp_c     = MIN_ON_TEMP_C;

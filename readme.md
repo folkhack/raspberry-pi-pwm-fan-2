@@ -8,7 +8,7 @@
 
 ---
 
-[!WARNING] Major April 2024 updates
+## ⚠ Major April 2024 Updates ⚠
 
 **This program expects a FULLY up-to-date Raspberry Pi OS (either current and legacy) and firmware**
 
